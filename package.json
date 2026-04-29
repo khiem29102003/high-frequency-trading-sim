@@ -1,0 +1,27 @@
+{
+  "name": "high-frequency-trading-sim",
+  "version": "1.0.0",
+  "private": true,
+  "packageManager": "npm@10",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "main": "index.js",
+  "scripts": {
+    "dev": "npm -w @hfts/api run start:dev",
+    "dev:web": "npm -w @hfts/web run dev",
+    "dev:api": "npm -w @hfts/api run start:dev",
+    "build": "npm -ws run build",
+    "lint": "npm -ws run lint",
+    "test": "npm -ws run test",
+    "format": "npm -ws run format"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "devDependencies": {
+    "typescript": "^6.0.3"
+  }
+}

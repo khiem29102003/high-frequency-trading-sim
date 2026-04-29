@@ -1,0 +1,196 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum OrderSide {
+  BUY
+  SELL
+}
+
+enum OrderType {
+  LIMIT
+}
+
+enum OrderStatus {
+  OPEN
+  PARTIALLY_FILLED
+  FILLED
+  CANCELLED
+}
+
+model User {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  account  Account?
+  holdings Holding[]
+  orders   Order[]
+  makerFills OrderFill[] @relation("maker_user")
+  takerFills OrderFill[] @relation("taker_user")
+
+  @@map("users")
+}
+
+model Account {
+  userId        String   @id @map("user_id") @db.Uuid
+  currency      String   @default("USD")
+  availableCash Decimal  @default(0) @map("available_cash") @db.Decimal(20, 8)
+  reservedCash  Decimal  @default(0) @map("reserved_cash") @db.Decimal(20, 8)
+  updatedAt     DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("accounts")
+}
+
+model Asset {
+  symbol       String  @id
+  name         String
+  priceDecimals Int    @map("price_decimals")
+  qtyDecimals   Int    @map("qty_decimals")
+  isActive     Boolean @default(true) @map("is_active")
+
+  holdings Holding[]
+  orders   Order[]
+
+  @@map("assets")
+}
+
+model Holding {
+  userId       String   @map("user_id") @db.Uuid
+  symbol       String
+  availableQty Decimal  @default(0) @map("available_qty") @db.Decimal(20, 8)
+  reservedQty  Decimal  @default(0) @map("reserved_qty") @db.Decimal(20, 8)
+  avgCost      Decimal  @default(0) @map("avg_cost") @db.Decimal(20, 8)
+  realizedPnl  Decimal  @default(0) @map("realized_pnl") @db.Decimal(20, 8)
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  asset Asset @relation(fields: [symbol], references: [symbol], onDelete: Restrict)
+
+  @@id([userId, symbol])
+  @@map("holdings")
+}
+
+model Order {
+  id           String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId       String      @map("user_id") @db.Uuid
+  symbol       String
+  side         OrderSide
+  type         OrderType
+  limitPrice   Decimal     @map("limit_price") @db.Decimal(20, 8)
+  qty          Decimal     @db.Decimal(20, 8)
+  remainingQty Decimal     @map("remaining_qty") @db.Decimal(20, 8)
+  status       OrderStatus
+  reservedCash Decimal     @default(0) @map("reserved_cash") @db.Decimal(20, 8)
+  reservedQty  Decimal     @default(0) @map("reserved_qty") @db.Decimal(20, 8)
+  createdAt    DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  asset Asset @relation(fields: [symbol], references: [symbol], onDelete: Restrict)
+
+  makerFills OrderFill[] @relation("maker_order")
+  takerFills OrderFill[] @relation("taker_order")
+
+  @@index([symbol, side, status, limitPrice, createdAt], map: "orders_book_idx")
+  @@index([userId, createdAt(sort: Desc)], map: "orders_user_idx")
+  @@map("orders")
+}
+
+model OrderFill {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  symbol       String
+  price        Decimal  @db.Decimal(20, 8)
+  qty          Decimal  @db.Decimal(20, 8)
+
+  makerOrderId String @map("maker_order_id") @db.Uuid
+  takerOrderId String @map("taker_order_id") @db.Uuid
+  makerUserId  String @map("maker_user_id") @db.Uuid
+  takerUserId  String @map("taker_user_id") @db.Uuid
+
+  executedAt DateTime @default(now()) @map("executed_at") @db.Timestamptz(6)
+
+  makerOrder Order @relation("maker_order", fields: [makerOrderId], references: [id], onDelete: Restrict)
+  takerOrder Order @relation("taker_order", fields: [takerOrderId], references: [id], onDelete: Restrict)
+  makerUser  User  @relation("maker_user", fields: [makerUserId], references: [id], onDelete: Restrict)
+  takerUser  User  @relation("taker_user", fields: [takerUserId], references: [id], onDelete: Restrict)
+
+  @@index([makerUserId, executedAt(sort: Desc)], map: "fills_maker_user_idx")
+  @@index([takerUserId, executedAt(sort: Desc)], map: "fills_taker_user_idx")
+  @@index([symbol, executedAt(sort: Desc)], map: "fills_symbol_idx")
+  @@map("order_fills")
+}
+
+model MarketTick {
+  id     BigInt   @id @default(autoincrement())
+  symbol String
+  price  Decimal  @db.Decimal(20, 8)
+  ts     DateTime @db.Timestamptz(6)
+
+  @@unique([symbol, ts], map: "ticks_symbol_ts_uniq")
+  @@index([symbol, ts(sort: Desc)], map: "ticks_symbol_ts_idx")
+  @@map("market_ticks")
+}
+
+model OutboxEvent {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  topic       String
+  payload     Json
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  publishedAt DateTime? @map("published_at") @db.Timestamptz(6)
+
+  @@index([publishedAt, createdAt], map: "outbox_publish_idx")
+  @@map("outbox_events")
+}
+
+model PortfolioSnapshot {
+  userId String   @map("user_id") @db.Uuid
+  ts     DateTime @db.Timestamptz(6)
+  equity Decimal  @db.Decimal(20, 8)
+  cash   Decimal  @db.Decimal(20, 8)
+
+  @@id([userId, ts])
+  @@map("portfolio_snapshots")
+}
+
+model LeaderboardCache {
+  userId String   @id @map("user_id") @db.Uuid
+  profit Decimal  @db.Decimal(20, 8)
+  equity Decimal  @db.Decimal(20, 8)
+  rank   Int
+  asOf   DateTime @map("as_of") @db.Timestamptz(6)
+
+  @@index([rank], map: "leaderboard_rank_idx")
+  @@map("leaderboard_cache")
+}
+
+enum IdempotencyStatus {
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+}
+
+model IdempotencyKey {
+  id             String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId         String            @map("user_id") @db.Uuid
+  idempotencyKey String            @map("idempotency_key")
+  action         String
+  status         IdempotencyStatus @default(IN_PROGRESS)
+  requestHash    String            @map("request_hash")
+  responseStatus Int?              @map("response_status")
+  responseBody   Json?             @map("response_body")
+  createdAt      DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  expiresAt      DateTime          @map("expires_at") @db.Timestamptz(6)
+
+  @@unique([userId, idempotencyKey, action], map: "idempotency_user_key_action_uniq")
+  @@index([expiresAt], map: "idempotency_expiry_idx")
+  @@map("idempotency_keys")
+}
